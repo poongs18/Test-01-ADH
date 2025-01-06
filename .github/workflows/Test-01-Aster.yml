@@ -26,7 +26,7 @@ jobs:
           -v ${{ github.workspace }}:/jmeter \
           -w /jmeter \
           justb4/jmeter \
-          -n -t Aster.jmx -l Asterresults.jtl
+          -n -t Health_care.jmx -l Health_care_results.jtl
           
     - name: Parse JTL file and prepare email content
       id: parse-results
@@ -55,7 +55,7 @@ jobs:
               parsed_results="$parsed_results<tr><td style='border: 1px solid black; padding: 8px; text-align: left;'>$label</td><td style='border: 1px solid black; padding: 8px;'>${response_time} sec</td><td style='border: 1px solid black; padding: 8px;'>$result</td></tr>"
             fi
           fi
-        done < Asterresults.jtl
+        done < Health_care_results.jtl
 
         # Remove trailing comma from failed_labels
         failed_labels="${failed_labels%,*}"
