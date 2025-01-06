@@ -1,0 +1,110 @@
+name: Run Aster Script and Send Results
+
+on:
+  workflow_dispatch:  # Allows manual triggering of the workflow
+
+jobs:
+  run-jmeter:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set run details
+      run: |
+        run_number=$(($GITHUB_RUN_NUMBER - 1)) # Subtract 1 as GITHUB_RUN_NUMBER starts from 1
+        run_date=$(date +'%Y-%m-%d')
+        run_time=$(TZ=Asia/Kolkata date +'%I:%M %p, %Z') # Get Indian Standard Time (IST)
+        echo "run_number=$run_number" >> $GITHUB_ENV
+        echo "run_date=$run_date" >> $GITHUB_ENV
+        echo "run_time=$run_time" >> $GITHUB_ENV
+      
+    - name: Run JMeter script in Docker
+      run: |
+        docker run --rm \
+          -v ${{ github.workspace }}:/jmeter \
+          -w /jmeter \
+          justb4/jmeter \
+          -n -t Aster.jmx -l Asterresults.jtl
+          
+    - name: Parse JTL file and prepare email content
+      id: parse-results
+      run: |
+        # Define the transactions to focus on
+        target_labels=("01_Launch" "02_About Us" "03_Global_Network" "04_Excellence" "05_Innovation" "06_Investors" "07_Media_Center" "08_Careers" "09_Contact Us") 
+        
+        parsed_results="<table style='border-collapse: collapse; width: auto; max-width: 700px; margin: auto;'><tr style='background-color: yellow;'><th style='border: 1px solid black; padding: 8px; text-align: left;'>PageName</th><th style='border: 1px solid black; padding: 8px;'>Response Time</th><th style='border: 1px solid black; padding: 8px;'>Status</th></tr>"
+        overall_status="Successful"
+        failed_labels=""
+        
+        # Loop through the JTL file and filter only the required labels
+        while IFS=, read -r timeStamp elapsed label responseCode responseMessage threadName dataType success failureMessage bytes sentBytes grpThreads allThreads URL Latency IdleTime Connect; do
+          # Check if the label is in our target labels
+          if [[ " ${target_labels[@]} " =~ " ${label} " ]]; then
+            if [ "$label" != "label" ]; then
+              if [ $elapsed -le 10000 ]; then
+                result="<span style='color: green;'>Pass</span>"
+              else
+                result="<span style='color: red;'>Fail</span>"
+                overall_status="Failure"
+                failed_labels="$failed_labels$label, "
+              fi
+              # Convert response time to seconds and format
+              response_time=$(printf "%.2f" $(bc <<< "scale=2; $elapsed / 1000"))
+              parsed_results="$parsed_results<tr><td style='border: 1px solid black; padding: 8px; text-align: left;'>$label</td><td style='border: 1px solid black; padding: 8px;'>${response_time} sec</td><td style='border: 1px solid black; padding: 8px;'>$result</td></tr>"
+            fi
+          fi
+        done < Asterresults.jtl
+
+        # Remove trailing comma from failed_labels
+        failed_labels="${failed_labels%,*}"
+        parsed_results="$parsed_results</table>"
+
+        # Summary based on overall status
+        if [ "$overall_status" = "Successful" ]; then
+          summary="All specified transactions met the response time SLA of 10 seconds, indicating optimal performance."
+        else
+          summary="Please note that the following transactions failed to meet the performance criteria: $failed_labels. Immediate action is required to address the performance issues identified."
+        fi
+
+        # Set environment variables for later use in the email
+        echo "parsed_results=$parsed_results" >> $GITHUB_ENV
+        echo "overall_status=$overall_status" >> $GITHUB_ENV
+        echo "failed_labels=$failed_labels" >> $GITHUB_ENV
+        echo "summary=$summary" >> $GITHUB_ENV
+
+    - name: Send email with parsed results
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.hostinger.com
+        server_port: 465
+        username: ${{ secrets.USERNAME }}
+        password: ${{ secrets.PASSWORD }}
+        subject: "Aster- Real Time Monitoring - #${{ env.run_number }} - ${{ env.run_date }} & ${{ env.run_time }} - Health Status - ${{ env.overall_status }}!"
+        html_body: |
+          <html>
+          <body style="font-family: Calibri, sans-serif;">
+            <div style='float: left; margin-right: 20px;'> <!-- Align table to left -->
+              <p>Please find the details of Application responsiveness:</p>
+              <p>${{ env.parsed_results }}</p>
+            </div>
+            <div style='clear: both;'></div> <!-- Clear float -->
+            <p></p> <!-- Add space between table and build information -->
+            
+            <p><b>Build Information:</b></p>
+            <p>Build Health Status: ${{ env.overall_status }}!<br>
+            Build Date and Time: ${{ env.run_date }} & ${{ env.run_time }}</p>
+            
+            <p><b>Summary:</b></p>
+            <p>${{ env.summary }}</p>
+
+            <p>Thanks,<br>
+            QA Team.</p>
+
+            <p>Note: This is an auto-generated email. Do not reply</p>
+          </body>
+          </html>
+        to: jenkins@thinktime.in
+        from: ${{ secrets.USERNAME }}
+        priority: normal
