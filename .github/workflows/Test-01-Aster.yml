@@ -5,12 +5,12 @@ on:
 
 jobs:
   run-jmeter:
-    runs-on: ubuntu-22.04.
+    runs-on: ubuntu-22.04
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Set run details
       run: |
         run_number=$(($GITHUB_RUN_NUMBER - 1)) # Subtract 1 as GITHUB_RUN_NUMBER starts from 1
@@ -19,7 +19,7 @@ jobs:
         echo "run_number=$run_number" >> $GITHUB_ENV
         echo "run_date=$run_date" >> $GITHUB_ENV
         echo "run_time=$run_time" >> $GITHUB_ENV
-      
+
     - name: Run JMeter script in Docker
       run: |
         docker run --rm \
@@ -27,17 +27,17 @@ jobs:
           -w /jmeter \
           justb4/jmeter \
           -n -t Health_care.jmx -l Health_care_results.jtl
-          
+
     - name: Parse JTL file and prepare email content
       id: parse-results
       run: |
         # Define the transactions to focus on
-        target_labels=("01_Launch" "02_About Us" "03_Global_Network" "04_Excellence" "05_Innovation" "06_Investors" "07_Media_Center" "08_Careers" "09_Contact Us") 
-        
+        target_labels=("01_Launch" "02_About Us" "03_Global_Network" "04_Excellence" "05_Innovation" "06_Investors" "07_Media_Center" "08_Careers" "09_Contact Us")
+
         parsed_results="<table style='border-collapse: collapse; width: auto; max-width: 700px; margin: auto;'><tr style='background-color: yellow;'><th style='border: 1px solid black; padding: 8px; text-align: left;'>PageName</th><th style='border: 1px solid black; padding: 8px;'>Response Time</th><th style='border: 1px solid black; padding: 8px;'>Status</th></tr>"
         overall_status="Successful"
         failed_labels=""
-        
+
         # Loop through the JTL file and filter only the required labels
         while IFS=, read -r timeStamp elapsed label responseCode responseMessage threadName dataType success failureMessage bytes sentBytes grpThreads allThreads URL Latency IdleTime Connect; do
           # Check if the label is in our target labels
