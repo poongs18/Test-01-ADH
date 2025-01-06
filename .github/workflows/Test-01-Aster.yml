@@ -20,12 +20,21 @@ jobs:
         echo "run_date=$run_date" >> $GITHUB_ENV
         echo "run_time=$run_time" >> $GITHUB_ENV
 
+    - name: Pull custom JMeter Docker image with plugins
+      run: |
+        docker pull justb4/jmeter:5.5
+        docker run --rm \
+          -v ${{ github.workspace }}/jmeter:/opt/apache-jmeter-5.5/lib/ext \
+          alpine:latest sh -c "wget -P /opt/apache-jmeter-5.5/lib/ext/ https://jmeter-plugins.org/files/packages/jpgc-cmd-latest.zip && \
+                                unzip /opt/apache-jmeter-5.5/lib/ext/jpgc-cmd-latest.zip -d /opt/apache-jmeter-5.5/lib/ext/ && \
+                                rm /opt/apache-jmeter-5.5/lib/ext/jpgc-cmd-latest.zip"
+
     - name: Run JMeter script in Docker
       run: |
         docker run --rm \
           -v ${{ github.workspace }}:/jmeter \
           -w /jmeter \
-          justb4/jmeter \
+          justb4/jmeter:5.5 \
           -n -t Health_care.jmx -l Health_care_results.jtl
 
     - name: Parse JTL file and prepare email content
@@ -40,7 +49,6 @@ jobs:
 
         # Loop through the JTL file and filter only the required labels
         while IFS=, read -r timeStamp elapsed label responseCode responseMessage threadName dataType success failureMessage bytes sentBytes grpThreads allThreads URL Latency IdleTime Connect; do
-          # Check if the label is in our target labels
           if [[ " ${target_labels[@]} " =~ " ${label} " ]]; then
             if [ "$label" != "label" ]; then
               if [ $elapsed -le 10000 ]; then
@@ -50,25 +58,21 @@ jobs:
                 overall_status="Failure"
                 failed_labels="$failed_labels$label, "
               fi
-              # Convert response time to seconds and format
               response_time=$(printf "%.2f" $(bc <<< "scale=2; $elapsed / 1000"))
               parsed_results="$parsed_results<tr><td style='border: 1px solid black; padding: 8px; text-align: left;'>$label</td><td style='border: 1px solid black; padding: 8px;'>${response_time} sec</td><td style='border: 1px solid black; padding: 8px;'>$result</td></tr>"
             fi
           fi
         done < Health_care_results.jtl
 
-        # Remove trailing comma from failed_labels
         failed_labels="${failed_labels%,*}"
         parsed_results="$parsed_results</table>"
 
-        # Summary based on overall status
         if [ "$overall_status" = "Successful" ]; then
           summary="All specified transactions met the response time SLA of 10 seconds, indicating optimal performance."
         else
           summary="Please note that the following transactions failed to meet the performance criteria: $failed_labels. Immediate action is required to address the performance issues identified."
         fi
 
-        # Set environment variables for later use in the email
         echo "parsed_results=$parsed_results" >> $GITHUB_ENV
         echo "overall_status=$overall_status" >> $GITHUB_ENV
         echo "failed_labels=$failed_labels" >> $GITHUB_ENV
@@ -85,23 +89,17 @@ jobs:
         html_body: |
           <html>
           <body style="font-family: Calibri, sans-serif;">
-            <div style='float: left; margin-right: 20px;'> <!-- Align table to left -->
+            <div style='float: left; margin-right: 20px;'>
               <p>Please find the details of Application responsiveness:</p>
               <p>${{ env.parsed_results }}</p>
             </div>
-            <div style='clear: both;'></div> <!-- Clear float -->
-            <p></p> <!-- Add space between table and build information -->
-            
+            <div style='clear: both;'></div>
             <p><b>Build Information:</b></p>
             <p>Build Health Status: ${{ env.overall_status }}!<br>
             Build Date and Time: ${{ env.run_date }} & ${{ env.run_time }}</p>
-            
             <p><b>Summary:</b></p>
             <p>${{ env.summary }}</p>
-
-            <p>Thanks,<br>
-            QA Team.</p>
-
+            <p>Thanks,<br>QA Team.</p>
             <p>Note: This is an auto-generated email. Do not reply</p>
           </body>
           </html>
